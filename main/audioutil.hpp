@@ -449,21 +449,42 @@ namespace audio {
 
                 if(((uintptr_t)input % VEC_LEN_BYTES) == 0) {
                     // Input is already aligned; full steam ahead:
+                    // Do 32-byte chunks of input in the loop to avoid a pipeline stall:
                     asm volatile (
                         "LOOPNEZ %[cnt], .Lend_%=" "\n"
                             "EE.VLDHBC.16.INCP q0, q1, %[input]" "\n"
-                            // Pipeline stall for 1 clock cycle here.
+                            "EE.VLDHBC.16.INCP q2, q3, %[input]" "\n"
+
                             "EE.VST.128.IP q0, %[output], 16" "\n"
                             "EE.VST.128.IP q1, %[output], 16" "\n"
+
+                            "EE.VST.128.IP q2, %[output], 16" "\n"
+                            "EE.VST.128.IP q3, %[output], 16" "\n"
                         ".Lend_%=:" "\n"
                         : [input] "+r" (input),
                           [output] "+r" (output),
                           "=m" (MEM_BYTES(output,outByteCnt))
-                        : [cnt] "r" (outByteCnt / (2*VEC_LEN_BYTES)),
+                        : [cnt] "r" (outByteCnt / (4*VEC_LEN_BYTES)),
                           "m" (MEM_BYTES(input,inByteCnt))
                     );
 
-                    if(outByteCnt & VEC_LEN_BYTES) {
+                    if(outByteCnt & (2*VEC_LEN_BYTES)) {
+                        asm volatile (
+                            // "LOOPNEZ %[cnt], .Lend_%=" "\n"
+                                "EE.VLDHBC.16.INCP q0, q1, %[input]" "\n"
+                                // Pipeline stall for 1 clock cycle here.
+                                "EE.VST.128.IP q0, %[output], 16" "\n"
+                                "EE.VST.128.IP q1, %[output], 16" "\n"
+                            // ".Lend_%=:" "\n"
+                            : [input] "+r" (input),
+                              [output] "+r" (output),
+                              "=m" (MEM_BYTES(output,outByteCnt))
+                            : // [cnt] "r" (outByteCnt / (2*VEC_LEN_BYTES)),
+                              "m" (MEM_BYTES(input,inByteCnt))
+                        );
+                    }
+
+                    if(outByteCnt & (1*VEC_LEN_BYTES)) {
                         // One more full vector of output to go...
                         asm volatile (
                             "EE.VLDHBC.16.INCP q0, q1, %[input]" "\n" // Increments input by one vector!

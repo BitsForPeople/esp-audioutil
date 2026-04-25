@@ -43,7 +43,7 @@ static inline void touch(std::array<S,X>& arr) {
 }
 
 
-static constexpr std::size_t BUF_SAMPLE_CNT = 1024;
+static constexpr uint32_t BUF_SAMPLE_CNT = 1024;
 
 // For testing, use a defined alignment so that we can "simulate" any mis-alignment as needed:
 alignas(16) static std::array<int16_t, BUF_SAMPLE_CNT> ch16_1 {};
@@ -72,8 +72,12 @@ static void clearChannel(std::array<S,X>& ch) {
     fillChannel(ch,0);
 }
 
-static uint32_t min(const uint32_t a, const uint32_t b) {
+static constexpr uint32_t min(const uint32_t a, const uint32_t b) {
     return (a<b) ? a : b;
+}
+
+static constexpr uint32_t max(const uint32_t a, const uint32_t b) {
+    return (a>b) ? a : b;
 }
 
 template<typename S, std::size_t X, typename F>
@@ -99,6 +103,14 @@ static bool verify(const std::array<S,X>& ch, const F& fexp) {
     return ok;
 }
 
+/**
+ * @brief Short delay to let the system finish any background activities (logging...) before doing timing measurements.
+ * 
+ */
+static void dly(void) {
+    vTaskDelay(50/portTICK_PERIOD_MS);
+}
+
 
 
 extern "C" void app_main(void) {
@@ -112,12 +124,12 @@ extern "C" void app_main(void) {
         bool ok;
 
         Tmr tmr {};
-        uint32_t t = 0;
+        uint32_t t = -1;
         for(unsigned i = 0; i < _v(3); ++i) {
             touch(ch16_1);
             tmr.start();
             audio::utils::monoToStereo(ch16_1.data(), ch32.data(), _v(BUF_SAMPLE_CNT));
-            t = tmr.stop();
+            t = min(t,tmr.stop());
             touch(ch32);
         }
 
@@ -125,40 +137,49 @@ extern "C" void app_main(void) {
             return (((uint32_t)ix << 16) | ix);
         });
 
-        ESP_LOGI(TAG, "audio::utils::monoToStereo (%" PRIu32 " samples) : %" PRIu32 " cycles", (uint32_t)BUF_SAMPLE_CNT, t);
+        ESP_LOGI(TAG, "audio::utils::monoToStereo (%" PRIu32 " samples, double-aligned) : %" PRIu32 " cycles",
+            BUF_SAMPLE_CNT,
+            t);
         if(ok) {
             ESP_LOGI(TAG, "Verified good.");
         }
 
 
+        dly();
+
         static constexpr int32_t FILL_VALUE = -1;
 
         fillChannel(ch32,FILL_VALUE);
 
-        static constexpr std::size_t OFF = 1;
-        static constexpr std::size_t CNT = BUF_SAMPLE_CNT - 2*OFF;
+        static constexpr uint32_t OFF_IN = 3;
+        static constexpr uint32_t OFF_OUT = 1;
+        static constexpr uint32_t CNT = BUF_SAMPLE_CNT - 2*(max(OFF_IN,OFF_OUT));
 
-        int16_t* const in16 = ch16_1.data() + OFF;
-        int32_t* const out32 = ch32.data() + OFF;
+        int16_t* const in16 = ch16_1.data() + OFF_IN;
+        int32_t* const out32 = ch32.data() + OFF_OUT;
 
+        t = -1;
 
         for(unsigned i = 0; i < _v(3); ++i) {
             touch(ch16_1);
             tmr.start();
             audio::utils::monoToStereo(in16, out32, _v(CNT));
-            t = tmr.stop();
+            t = min(t,tmr.stop());
             touch(ch32);
         }
 
         ok = verify(ch32, [](const uint32_t ix) -> int32_t {
-            if(ix < OFF || ix >= (OFF+CNT)) {
+            if(ix < OFF_OUT || ix >= (OFF_OUT+CNT)) {
                 return FILL_VALUE;
             } else {
-                return (((uint32_t)ix << 16) | ix);
+                const uint32_t in_ix = ix - OFF_OUT + OFF_IN;
+                return (((uint32_t)in_ix << 16) | in_ix);
             }
         });
 
-        ESP_LOGI(TAG, "audio::utils::monoToStereo (%" PRIu32 " samples, double-unaligned) : %" PRIu32 " cycles", (uint32_t)CNT, t);
+        ESP_LOGI(TAG, "audio::utils::monoToStereo (%" PRIu32 " samples, double-unaligned) : %" PRIu32 " cycles",
+            CNT,
+            t);
         if(ok) {
             ESP_LOGI(TAG, "Verified good.");
         }
