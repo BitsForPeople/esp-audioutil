@@ -52,23 +52,23 @@ alignas(16) static std::array<int32_t, BUF_SAMPLE_CNT> ch32 {};
 
 
 template<typename S, std::size_t X>
-static void initChannel(std::array<S,X>& ch) {
+static void initChannel(std::array<S,X>& ch, const int32_t& offset = 0) {
     int16_t* const s16 = (int16_t*)ch.data();
     const std::size_t CNT16 = (ch.size() * sizeof(int16_t)) / sizeof(S);
     for(unsigned i = 0; i < CNT16; ++i) {
-        s16[i] = i;
+        s16[i] = i + offset;
     }
 }
 
 template<typename S, std::size_t X, typename V>
-static void fillChannel(std::array<S,X>& ch, const V& value) {
+static constexpr void fillChannel(std::array<S,X>& ch, const V& value) {
     for(S& s : ch) {
         s = value;
     }
 }
 
 template<typename S, std::size_t X>
-static void clearChannel(std::array<S,X>& ch) {
+static constexpr void clearChannel(std::array<S,X>& ch) {
     fillChannel(ch,0);
 }
 
@@ -121,10 +121,37 @@ extern "C" void app_main(void) {
         // initChannel(ch16_2);
         clearChannel(ch32);
 
+        const auto func = [](const uint32_t ix) -> int32_t {
+            return (((uint32_t)ix << 16) | ix);
+        };
+
         bool ok;
 
         Tmr tmr {};
         uint32_t t = -1;
+
+
+        for(unsigned i = 0; i < _v(3); ++i) {
+            touch(ch16_1);
+            tmr.start();
+            audio::Utils<arch::SoC::OTHER>::monoToStereo(ch16_1.data(), ch32.data(), _v(BUF_SAMPLE_CNT));
+            t = min(t,tmr.stop());
+            touch(ch32);
+        }
+
+        ok = verify(ch32, func);
+
+        ESP_LOGI(TAG, "audio::utils::monoToStereo (scalar, %" PRIu32 " samples, double-aligned) : %" PRIu32 " cycles",
+            BUF_SAMPLE_CNT,
+            t);
+        if(ok) {
+            ESP_LOGI(TAG, "Verified good.");
+        }
+
+
+
+        dly();
+
         for(unsigned i = 0; i < _v(3); ++i) {
             touch(ch16_1);
             tmr.start();
@@ -133,9 +160,7 @@ extern "C" void app_main(void) {
             touch(ch32);
         }
 
-        ok = verify(ch32, [](const uint32_t ix) {
-            return (((uint32_t)ix << 16) | ix);
-        });
+        ok = verify(ch32, func);
 
         ESP_LOGI(TAG, "audio::utils::monoToStereo (%" PRIu32 " samples, double-aligned) : %" PRIu32 " cycles",
             BUF_SAMPLE_CNT,
@@ -145,18 +170,20 @@ extern "C" void app_main(void) {
         }
 
 
+
         dly();
 
         static constexpr int32_t FILL_VALUE = -1;
 
         fillChannel(ch32,FILL_VALUE);
 
+        // Offset both input and output to make them mis-aligned:
         static constexpr uint32_t OFF_IN = 3;
         static constexpr uint32_t OFF_OUT = 1;
         static constexpr uint32_t CNT = BUF_SAMPLE_CNT - 2*(max(OFF_IN,OFF_OUT));
 
-        int16_t* const in16 = ch16_1.data() + OFF_IN;
-        int32_t* const out32 = ch32.data() + OFF_OUT;
+        const int16_t* const in16 = &ch16_1[OFF_IN];
+        int32_t* const out32 = &ch32[OFF_OUT];
 
         t = -1;
 
@@ -168,12 +195,12 @@ extern "C" void app_main(void) {
             touch(ch32);
         }
 
-        ok = verify(ch32, [](const uint32_t ix) -> int32_t {
+        ok = verify(ch32, [&func](const uint32_t ix) -> int32_t {
             if(ix < OFF_OUT || ix >= (OFF_OUT+CNT)) {
                 return FILL_VALUE;
             } else {
                 const uint32_t in_ix = ix - OFF_OUT + OFF_IN;
-                return (((uint32_t)in_ix << 16) | in_ix);
+                return func(in_ix);
             }
         });
 
@@ -184,6 +211,105 @@ extern "C" void app_main(void) {
             ESP_LOGI(TAG, "Verified good.");
         }
 
+
+    }
+
+    {
+
+        auto& in = ch32;
+        auto& out = ch16_1;
+        
+        for(uint32_t i = 0; i < BUF_SAMPLE_CNT; ++i) {
+            in[i] = (i << 16);
+        }
+        clearChannel(out);
+
+        static constexpr uint32_t GAIN = audio::fp::asQ16(1.5f);
+
+        const auto func = [](const uint32_t ix) -> int32_t {
+           return ((uint64_t)(ix << 16) * GAIN) >> (16+16);
+        };
+
+
+        dly();
+
+        bool ok;
+        Tmr tmr {};
+
+        uint32_t t = -1;
+        for(unsigned i = 0; i < _v(3); ++i) {
+            touch(in);
+            tmr.start();
+            audio::Utils<arch::SoC::OTHER>::reduce32to16(in.data(), out.data(), _v(BUF_SAMPLE_CNT), _v(GAIN));
+            t = min(t,tmr.stop());
+            touch(out);
+        }
+
+        ESP_LOGI(TAG, "audio::utils::reduce32to16 (scalar, %" PRIu32 " samples, double-aligned) : %" PRIu32 " cycles",
+            BUF_SAMPLE_CNT,
+            t);
+
+        if(verify(out, func)) {
+            ESP_LOGI(TAG, "Verified good.");
+        }
+
+
+        dly();
+
+        t = -1;
+        for(unsigned i = 0; i < _v(3); ++i) {
+            touch(in);
+            tmr.start();
+            audio::utils::reduce32to16(in.data(), out.data(), _v(BUF_SAMPLE_CNT), _v(GAIN));
+            t = min(t,tmr.stop());
+            touch(out);
+        }
+
+        ESP_LOGI(TAG, "audio::utils::reduce32to16 (%" PRIu32 " samples, double-aligned) : %" PRIu32 " cycles",
+            BUF_SAMPLE_CNT,
+             t);
+
+        if(verify(ch16_1, func)) {
+            ESP_LOGI(TAG, "Verified good.");
+        }
+
+
+        static constexpr int32_t FILL_VALUE = -1;
+        fillChannel(ch16_1,FILL_VALUE);
+
+        // Offset both input and output to make them mis-aligned:
+        static constexpr uint32_t OFF_IN = 1;
+        static constexpr uint32_t OFF_OUT = 3;
+        static constexpr uint32_t CNT = BUF_SAMPLE_CNT - 2*(max(OFF_IN,OFF_OUT));
+
+        const int32_t* const in32 = &in[OFF_IN];
+        int16_t* const out16 = &out[OFF_OUT];
+
+        t = -1;
+        for(unsigned i = 0; i < _v(3); ++i) {
+            touch(in);
+            tmr.start();
+            audio::utils::reduce32to16(in32, out16, _v(CNT), _v(GAIN));
+            t = min(t,tmr.stop());
+            touch(out);
+        }
+
+        ESP_LOGI(TAG, "audio::utils::reduce32to16 (%" PRIu32 " samples, double-unaligned) : %" PRIu32 " cycles",
+            CNT,
+            t);
+
+        ok = verify(out, [&func](const uint32_t ix) -> int32_t {
+            if(ix < OFF_OUT || ix >= (OFF_OUT+CNT)) {
+                return FILL_VALUE;
+            } else {
+                const uint32_t in_ix = ix - OFF_OUT + OFF_IN;
+                return func(in_ix);
+            }
+        });
+
+        if(ok) {
+            ESP_LOGI(TAG, "Verified good.");
+        }
 
     }
 

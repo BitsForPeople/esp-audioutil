@@ -66,10 +66,53 @@
         template<arch::SoC SOC>
         struct Impl {
 
+            /**
+             * @brief Clamps/saturates the given signed value \p v to 
+             * a signed value of \p BITS bits (incl. sign bit).
+             * 
+             * 
+             * @tparam BITS number of bits to clamp to; default: 16
+             * @param v value to saturate
+             * @return \p v saturated to the range -(1<<(BITS-1))...+(1<<(BITS-1))-1
+             */
+            template<unsigned BITS = 16>
+            requires (BITS >= (7+1) && BITS <= (22+1))
+            static inline constexpr int32_t clamp(const int32_t v) {
+                static constexpr int32_t MIN = -(1<<(BITS-1));
+                static constexpr int32_t MAX = -1 - MIN;
+                return std::min(std::max(v,MIN),MAX);
+            }
+
         };
 
         template<>
-        struct Impl<arch::SoC::ESP32_S3> {
+        struct Impl<arch::SoC::ESP32> : public Impl<arch::SoC::OTHER> {
+            // The inline assembly in this function prevents some gcc optimizations, sometimes causing a net loss in performance.
+            template<unsigned BITS = 16>
+            requires (BITS >= (7+1) && BITS <= (22+1))
+            static inline constexpr int32_t clamp_(const int32_t v) {
+                static constexpr int32_t MIN = -(1<<(BITS-1));
+                static constexpr int32_t MAX = -MIN - 1;
+                if(std::is_constant_evaluated() || ctime::known(v)) {
+                    return Impl<arch::SoC::OTHER>::clamp(v);
+                } else {
+                    int32_t r;
+                    asm (
+                        "CLAMPS %[r], %[v], %[bits]"
+                        : [r] "=r" (r)
+                        : [v] "r" (v),
+                          [bits] "n" (BITS-1)
+                    );
+                    [[assume(r >= MIN)]];
+                    [[assume(r <= MAX)]];
+                    [[assume((r & ~(((uint32_t)1<<BITS)-1)) == 0)]];
+                    return r;
+                }
+            } 
+        };
+
+        template<>
+        struct Impl<arch::SoC::ESP32_S3> : public Impl<arch::SoC::ESP32> {
             /**
              * @brief Writes the lower 0...15 bytes from Q register \p QR0 to memory at \p dst.
              * \p QR1 is used as a temporary, and both \p QR0 and \p QR1 are clobbered.

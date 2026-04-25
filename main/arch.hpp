@@ -90,6 +90,17 @@ namespace arch {
         #endif
 
     /**
+     * @brief Do we have the Xtensas' CLAMPS instruction for saturating?
+     * 
+     */
+    static inline constexpr bool XT_CLAMPS = IS_XTENSA &&
+        #if XCHAL_HAVE_CLAMPS
+            true;
+        #else
+            false;
+        #endif
+
+    /**
      * @brief Do we have the Xtensas' memory ordering loads/stores?
      * 
      */

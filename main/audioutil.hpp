@@ -67,7 +67,7 @@ namespace audio {
                     in16 += 2;
                     output += 1;
                 }
-                // Bring, portable ANSI C:
+                // Boring, portable ANSI C:
                 // while(output < out_end) {
                 //     *output = *input >> 16;
                 //     input += 1;
@@ -75,7 +75,9 @@ namespace audio {
                 // }
             } else {
                 while(output < out_end) {
-                    *output = ((int64_t)(*input) * gainQ16) >> (16+16);
+                    *output = simdutil::impl::Impl<SOC>::template clamp<16>(
+                        ((int64_t)(*input) * gainQ16) >> (16+16)
+                    );
                     input += 1;
                     output += 1;
                 }
@@ -113,7 +115,9 @@ namespace audio {
                     // }
                 } else {
                     while(output < out_end) {
-                        *output = (((int64_t)(*input) * gainQ16) >> (16+16)) & mask;
+                        *output = simdutil::impl::Impl<SOC>::template clamp<16>(
+                            (((int64_t)(*input) * gainQ16) >> (16+16))
+                         ) & mask;
                         input += 1;
                         output += 1;
                     }
@@ -151,12 +155,12 @@ namespace audio {
         // [[gnu::noinline]]
         static inline void monoToStereo(const int16_t* input, OUT_t* output, const uint32_t sampleCnt) {
             const int16_t* const in_end = input + sampleCnt;
-            int16_t* out = (int16_t*)output;
+            int16_t* out16 = (int16_t*)output;
             while(input < in_end) {
-                out[0] = input[0];
-                out[1] = input[0];
+                out16[0] = input[0];
+                out16[1] = input[0];
                 input += 1;
-                out += 2;
+                out16 += 2;
             }
         }
     };
@@ -413,12 +417,6 @@ namespace audio {
             static constexpr std::size_t OUT_ELEM_SZ = sizeof(OUT_t); // 4.
             static constexpr std::size_t IN_ELEM_SZ = sizeof(IN_t); // 2.
 
-            // static constexpr unsigned OUT_TO_IN_RATIO = OUT_ELEM_SZ / IN_ELEM_SZ; // 2.
-
-            // Memory barrier for the compiler:
-            asm volatile (""::"m" (MEM_ELEMS(input, sampleCnt)));
-            asm volatile ("":"=m" (MEM_ELEMS(output, sampleCnt)));
-
             static constexpr unsigned Q_OUT = 2;
             static constexpr unsigned Q_TMP = 3;
 
@@ -449,7 +447,7 @@ namespace audio {
 
                 if(((uintptr_t)input % VEC_LEN_BYTES) == 0) {
                     // Input is already aligned; full steam ahead:
-                    // Do 32-byte chunks of input in the loop to avoid a pipeline stall:
+                    // Do 32-byte chunks of input in the loop to avoid pipeline stalls:
                     asm volatile (
                         "LOOPNEZ %[cnt], .Lend_%=" "\n"
                             "EE.VLDHBC.16.INCP q0, q1, %[input]" "\n"
@@ -469,18 +467,16 @@ namespace audio {
                     );
 
                     if(outByteCnt & (2*VEC_LEN_BYTES)) {
+                        // Have at least two more full vectors of output to produce:
                         asm volatile (
-                            // "LOOPNEZ %[cnt], .Lend_%=" "\n"
-                                "EE.VLDHBC.16.INCP q0, q1, %[input]" "\n"
-                                // Pipeline stall for 1 clock cycle here.
-                                "EE.VST.128.IP q0, %[output], 16" "\n"
-                                "EE.VST.128.IP q1, %[output], 16" "\n"
-                            // ".Lend_%=:" "\n"
+                            "EE.VLDHBC.16.INCP q0, q1, %[input]" "\n"
+                            // Pipeline stall for 1 clock cycle here.
+                            "EE.VST.128.IP q0, %[output], 16" "\n"
+                            "EE.VST.128.IP q1, %[output], 16" "\n"
                             : [input] "+r" (input),
                               [output] "+r" (output),
                               "=m" (MEM_BYTES(output,outByteCnt))
-                            : // [cnt] "r" (outByteCnt / (2*VEC_LEN_BYTES)),
-                              "m" (MEM_BYTES(input,inByteCnt))
+                            : "m" (MEM_BYTES(input,inByteCnt))
                         );
                     }
 
