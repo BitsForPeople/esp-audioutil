@@ -6,6 +6,9 @@
 #include <cmath> // ldexpf
 #include <algorithm> // std::min
 #include <concepts>
+#include <span>
+#include <cstring>
+
 #include "arch.hpp"
 #include "simdutil.hpp"
 
@@ -19,36 +22,32 @@ namespace audio {
                 return (uint32_t)std::ldexpf(f,16); // might not be constexpr prior to C++23
             }
         }
-
-        // template<std::integral I>
-        // static constexpr unsigned BITWIDTH = sizeof(I) * 8;
-
-        // template<unsigned FRACBITS = 16, std::signed_integral I = int32_t>
-        // requires (!std::is_const_v<I> && BITWIDTH<I> > FRACBITS)
-        // struct FP {
-        //     using valtype = I;
-        //     static constexpr unsigned BITS = BITWIDTH<valtype>;
-        //     static constexpr unsigned FRAC_BITS = FRACBITS;
-        //     static constexpr unsigned INT_BITS = BITS - FRAC_BITS;
-
-        //     valtype intval {};
-        //     constexpr FP(void) = default;
-        //     constexpr FP(const FP&) = deafult;
-        //     constexpr FP(FP&&) = default;
-        //     constexpr 
-        // };
     }
 
     static constexpr uint32_t UNITY_GAIN = fp::asQ16(1.0f);
 
     /**
-     * @brief Basic C implementation of the utility functions as fallback when we don't have specialized variants
+     * @brief Basic C++ implementation of the utility functions as fallback when we don't have specialized variants
      * for our current target SoC.
      * 
      * @tparam SOC The target SoC for which we're building.
      */
     template<arch::SoC SOC>
     struct Utils {
+
+        /**
+         * @brief Clears a memory range to all-0.
+         * 
+         * @tparam D 
+         * @tparam X 
+         * 
+         * @param mem std::span of the memory to clear
+         */
+        template<typename D, std::size_t X>
+        requires (!std::is_const_v<D>)
+        static inline void clr(const std::span<D,X>& mem) {
+            std::memset(mem.data(), 0, mem.size_bytes());
+        }
         /**
          * @brief Takes \p sampleCnt 32-bit samples from \p input, multiplies each by the \p gainQ16 (16.16), and 
          * stores the upper 16 bits of each resulting sample to \p output.
@@ -180,17 +179,65 @@ namespace audio {
 
 
         /* Forms a memory reference to \c bcnt bytes pointed to by \c ptr */
-        #define MEM_BYTES(ptr,bcnt) (*((std::remove_reference_t<typeof(*ptr)>(*)[(bcnt) / sizeof(std::remove_reference_t<typeof(*ptr)>)])ptr))
+        #define MEM_BYTES(ptr,bcnt) (*((std::remove_reference_t<decltype(*ptr)>(*)[(bcnt) / sizeof(std::remove_reference_t<decltype(*ptr)>)])ptr))
 
         /* Forms a memory reference to \c cnt elements of the array pointed to by \c ptr */
-        #define MEM_ELEMS(ptr,cnt) (*(std::remove_reference_t<typeof(*ptr)>(*)[cnt])ptr)
+        #define MEM_ELEMS(ptr,cnt) (*(std::remove_reference_t<decltype(*ptr)>(*)[cnt])ptr)
 
 
-        [[gnu::noinline]]
+        /**
+         * @brief Clears a memory range to all-0.
+         * 
+         * @tparam D 
+         * @tparam X 
+         * 
+         * @param mem std::span of the memory to clear
+         */
+        template<typename D, std::size_t X>
+        requires (!std::is_const_v<D>)
+        static inline void clr(const std::span<D,X>& mem) {
+            uint32_t dummy;
+            asm ("":"=m" (dummy));
+
+            uint32_t byteCnt = mem.size_bytes();
+            D* dst = mem.data();
+            if(byteCnt >= VEC_LEN_BYTES) {
+                {
+                    uint32_t off = ((uintptr_t)dst + 15) & ~0xf;
+                    if(off != (uintptr_t)dst) {
+                        off = off - (uintptr_t)dst;
+                        off = std::min(off,byteCnt);
+                        byteCnt -= off;
+                        clrmem_shrt(dst,off);
+                    }
+                }
+                asm (
+                    "EE.ZERO.Q q0" "\n"
+                    "LOOPNEZ %[cnt], .Lend_%=" "\n"
+                        "EE.VST.128.IP q0, %[dst], 16" "\n"
+                    ".Lend_%=:"
+                    : [dst] "+r" (dst),
+                      "=m" (MEM_BYTES(dst,byteCnt))
+                    : [cnt] "r" (byteCnt / VEC_LEN_BYTES)
+                );
+            }
+            clrmem_shrt(dst, byteCnt);
+
+        }
+
+        /**
+         * @brief 
+         * 
+         * @param input 
+         * @param output must be 2-byte aligned!
+         * @param sampleCnt 
+         * @param gainQ16 
+         */
+        // [[gnu::noinline]]
         static inline void reduce32to16(const int32_t* input, int16_t* output, uint32_t sampleCnt, uint32_t gainQ16 = UNITY_GAIN) {
 
-            using IN_t = std::remove_reference_t<typeof(*input)>;
-            using OUT_t = std::remove_reference_t<typeof(*output)>;
+            using IN_t = std::remove_reference_t<decltype(*input)>;
+            using OUT_t = std::remove_reference_t<decltype(*output)>;
 
             static constexpr std::size_t OUT_ELEM_SZ = sizeof(OUT_t); // 2.
             static constexpr std::size_t IN_ELEM_SZ = sizeof(IN_t); // 4.
@@ -279,11 +326,20 @@ namespace audio {
         }
 
 
-        [[gnu::noinline]]
+        /**
+         * @brief 
+         * 
+         * @param input 
+         * @param output must be 2-byte aligned!
+         * @param sampleCnt 
+         * @param gainQ16 
+         * @param significantBits 
+         */
+        // [[gnu::noinline]]
         static inline void reduce32to16(const int32_t* input, int16_t* output, const uint32_t sampleCnt, uint32_t gainQ16, const uint32_t significantBits) {
             
-            using IN_t = std::remove_reference_t<typeof(*input)>;
-            using OUT_t = std::remove_reference_t<typeof(*output)>;
+            using IN_t = std::remove_reference_t<decltype(*input)>;
+            using OUT_t = std::remove_reference_t<decltype(*output)>;
 
             static constexpr std::size_t OUT_ELEM_SZ = sizeof(OUT_t); // 2.
             static constexpr std::size_t IN_ELEM_SZ = sizeof(IN_t); // 4.
@@ -400,6 +456,91 @@ namespace audio {
         }
 
         /**
+         * @brief Produces \p sampleCnt output samples by reading 2* \p sampleCnt samples from \p input
+         * and averaging each pair of them into one output sample.
+         * 
+         * @param input 
+         * @param output 
+         * @param sampleCnt 
+         */
+        [[gnu::noinline]]
+        static inline void stereoToMono(const int16_t* input, int16_t* output, const uint32_t sampleCnt) {
+            static constexpr unsigned Q_OUT = 0;
+            static constexpr unsigned Q_TMP = 1;
+
+            // q7[0] := 1
+            asm volatile (
+                "EE.MOVI.32.Q q7, %[one], 0" "\n"
+                :
+                : [one] "r" (1)
+            );
+
+
+            auto f1 = [&input](const uint32_t outByteCnt) {
+                asm volatile (
+                    "EE.LD.128.USAR.IP q0, %[input], 16" "\n"
+                    "EE.VLD.128.IP q1, %[input], 16" "\n"
+                    "EE.VLD.128.IP q2, %[input], -(2*16)" "\n" // restore input
+
+                        "EE.SRC.Q.QUP q1, q0, q1" "\n"
+                        "EE.SRC.Q.QUP q2, q0, q2" "\n"
+
+                        "EE.VUNZIP.16 q1, q2" "\n"
+
+                        "EE.MOV.S16.QACC q1" "\n" // QACC[n] := q1[n]
+                        "EE.VSMULAS.S16.QACC q2, q7, 0" "\n" // QACC[n] += q2[n] * q7[0]
+
+                        "EE.SRCMB.S16.QACC q%[out], %[shift], 0" "\n"
+                    : 
+                    : [input] "r" (input),
+                      [shift] "r" (1),
+                      "m" (MEM_BYTES(input, outByteCnt*2)),
+                      [out] "n" (Q_OUT)
+                );
+
+                simdutil::ptrs::incp(input, outByteCnt*2);
+
+            };
+
+            auto floop = [&input](int16_t*& output, const uint32_t outByteCnt) {
+                const uint32_t inByteCnt = 2*outByteCnt;
+                asm volatile (
+                    "EE.LD.128.USAR.IP q0, %[input], 16" "\n"
+                    "EE.VLD.128.IP q1, %[input], 16" "\n"
+                    "EE.VLD.128.IP q2, %[input], 16" "\n"
+
+                    "LOOPNEZ %[cnt], .Lend_%=" "\n"
+
+                        "EE.SRC.Q.QUP q1, q0, q1" "\n"
+                        "EE.SRC.Q.QUP q2, q0, q2" "\n"
+
+                        "EE.VUNZIP.16 q1, q2" "\n"
+
+                        "EE.MOV.S16.QACC q1" "\n" // QACC[n] := q1[n]
+                        "EE.VSMULAS.S16.QACC.LD.INCP q1, %[input], q2, q7, 0" "\n" // QACC[n] += q2[n] * q7[0]
+
+                        "EE.VLD.128.IP q2, %[input], 16" "\n"
+
+                        "EE.SRCMB.S16.QACC q3, %[shift], 0" "\n" // q3[n] := QACC[n] >> 1
+
+                        "EE.VST.128.IP q3, %[output], 16" "\n"
+                    ".Lend_%=:" "\n"
+                    : [input] "+r" (input),
+                      [output] "+r" (output),
+                      "=m" (MEM_BYTES(output, outByteCnt))
+                    : [cnt] "r" (outByteCnt / VEC_LEN_BYTES),
+                      [shift] "r" (1),
+                      "m" (MEM_BYTES(input, inByteCnt))
+                );
+                simdutil::ptrs::incp(input, -(3*VEC_LEN_BYTES));
+            };
+
+            const uint32_t outByteCnt = sampleCnt * sizeof(int16_t);
+
+            simdutil::process<Q_OUT, Q_TMP>(f1, floop, output, outByteCnt);
+        }
+
+        /**
          * @brief Reads \p sampleCnt samples from \p input, duplicates each of them, and writes the 2* \p sampleCnt
          * samples to \p output
          * 
@@ -409,10 +550,10 @@ namespace audio {
          */
         template<typename OUT_t>
         requires (sizeof(OUT_t) == 2*sizeof(int16_t) && alignof(OUT_t) >= 2*alignof(int16_t))
-        [[gnu::noinline]]
+        // [[gnu::noinline]]
         static inline void monoToStereo(const int16_t* input, OUT_t* output, uint32_t sampleCnt) {
 
-            using IN_t = std::remove_reference_t<typeof(*input)>;
+            using IN_t = std::remove_reference_t<decltype(*input)>;
 
             static constexpr std::size_t OUT_ELEM_SZ = sizeof(OUT_t); // 4.
             static constexpr std::size_t IN_ELEM_SZ = sizeof(IN_t); // 2.
@@ -555,24 +696,26 @@ namespace audio {
          * inserting the lowest \p BYTECNT bytes of \p data into the upper-most
          * bytes of \p Q_REG.
          * 
-         * @tparam BYTECNT number of bytes to shift by/insert (1...4)
+         * @tparam BYTECNT number of bytes to shift by/insert (0...4)
          * @tparam Q_REG Q-register to shift
          * @tparam Q_TMP temporary Q-register (clobbered)
          * 
          * @param data data to shift into the upper bytes of \p Q_REG
          */
         template<std::size_t BYTECNT, unsigned Q_REG, unsigned Q_TMP>
-        requires (BYTECNT > 0 && BYTECNT <= 4 && Q_REG < 8 && Q_TMP < 8 && Q_REG != Q_TMP)
+        requires (BYTECNT <= 4 && Q_REG < 8 && Q_TMP < 8 && Q_REG != Q_TMP)
         static inline void rshiftBytesIntoQ(const uint32_t data) {
-            asm volatile (
-                "EE.MOVI.32.Q q%[tmp], %[data], 0" "\n"
-                "EE.SRCI.2Q q%[tmp], q%[tmp], (%[bcnt]-1)" "\n"
-                :
-                : [data] "r" (data),
-                  [reg] "n" (Q_REG),
-                  [tmp] "n" (Q_TMP),
-                  [bcnt] "n" (BYTECNT)
-            );
+            if constexpr (BYTECNT != 0) {
+                asm volatile (
+                    "EE.MOVI.32.Q q%[tmp], %[data], 0" "\n"
+                    "EE.SRCI.2Q q%[tmp], q%[tmp], (%[bcnt]-1)" "\n"
+                    :
+                    : [data] "r" (data),
+                    [reg] "n" (Q_REG),
+                    [tmp] "n" (Q_TMP),
+                    [bcnt] "n" (BYTECNT)
+                );
+            }
         }
 
 
@@ -600,7 +743,24 @@ namespace audio {
 
             template<typename P>
             static constexpr uint32_t elemCnt(P* ptr, const uint32_t numBytes) {
-                return numBytes / sizeof(std::remove_reference_t<typeof(*ptr)>);
+                return numBytes / sizeof(std::remove_reference_t<decltype(*ptr)>);
+            }
+
+
+            template<typename D>
+            static inline void clrmem_shrt(D*& ptr, const uint32_t byteCnt) {
+                if(byteCnt & 8) {
+                    simdutil::ptrs::put<uint64_t>(ptr,0);
+                }
+                if(byteCnt & 4) {
+                    simdutil::ptrs::put<uint32_t>(ptr,0);
+                }
+                if(byteCnt & 2) {
+                    simdutil::ptrs::put<uint16_t>(ptr,0);
+                }
+                if(byteCnt & 1) {
+                    simdutil::ptrs::put<uint8_t>(ptr,0);
+                }
             }
             
             /**
@@ -631,6 +791,8 @@ namespace audio {
                 {
                     const uint32_t g32 = (gainQ16 << shift); // g32 is the "mantissa"
 
+                    // assert( (g32 >> 16) >= 0x4000 && (g32 >> 16) < 0x8000);
+                    
                     // QR[0] := (int16_t)(g32 & 0xffff) - don't care.
                     // QR[1] := (int16_t)(g32 >> 16)
                     asm volatile (

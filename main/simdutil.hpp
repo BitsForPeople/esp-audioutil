@@ -359,7 +359,7 @@
             }
             // *dst is now 16-bytes aligned:
             // assert( ((uintptr_t)dst % VEC_LEN_BYTES) == 0 );
-            if((outByteLen / VEC_LEN_BYTES) != 0) {
+            if((outByteLen / VEC_LEN_BYTES) != 0) [[likely]] {
                 // Process full vectors in a loop: 
                 std::invoke(floop, dst, outByteLen, std::forward<Args...>(args)...);
                 outByteLen = outByteLen % VEC_LEN_BYTES;
@@ -378,9 +378,7 @@
                   floop did *not* change the alignment of *dst!
                 */
                 // Write remaining 1...15 bytes to *dst:
-                // gcc 14.2 fails to optimize these branches to simple bbci instructions like it does with writeUnaligned() above :-/
                 imp::template writeTail<Q_OUT,Q_TMP>(dst,outByteLen,dummy);
-                // imp::template writeUnaligned<Q_OUT, Q_TMP>(dst,outByteLen,dummy);
             }
         }
     };
