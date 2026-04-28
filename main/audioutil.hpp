@@ -29,7 +29,7 @@ namespace audio {
     /**
      * @brief Basic C++ implementation of the utility functions as fallback when we don't have specialized variants
      * for our current target SoC.
-     * 
+     *
      * @tparam SOC The target SoC for which we're building.
      */
     template<arch::SoC SOC>
@@ -37,10 +37,10 @@ namespace audio {
 
         /**
          * @brief Clears a memory range to all-0.
-         * 
-         * @tparam D 
-         * @tparam X 
-         * 
+         *
+         * @tparam D
+         * @tparam X
+         *
          * @param mem std::span of the memory to clear
          */
         template<typename D, std::size_t X>
@@ -49,9 +49,9 @@ namespace audio {
             std::memset(mem.data(), 0, mem.size_bytes());
         }
         /**
-         * @brief Takes \p sampleCnt 32-bit samples from \p input, multiplies each by the \p gainQ16 (16.16), and 
+         * @brief Takes \p sampleCnt 32-bit samples from \p input, multiplies each by the \p gainQ16 (16.16), and
          * stores the upper 16 bits of each resulting sample to \p output.
-         * 
+         *
          * @param input 32-bit input samples
          * @param output  16-bit output samples
          * @param sampleCnt number of samples to process
@@ -84,9 +84,9 @@ namespace audio {
         }
 
         /**
-         * @brief Takes \p sampleCnt 32-bit samples from \p input, multiplies each by the \p gainQ16 (16.16), and 
+         * @brief Takes \p sampleCnt 32-bit samples from \p input, multiplies each by the \p gainQ16 (16.16), and
          * stores the upper \p significantBits bits of each resulting sample as a sample in \p output.
-         * 
+         *
          * @param input 32-bit input samples
          * @param output  16-bit output samples
          * @param sampleCnt number of samples to process
@@ -127,10 +127,10 @@ namespace audio {
         /**
          * @brief Produces \p sampleCnt output samples by reading 2* \p sampleCnt samples from \p input
          * and averaging each pair of them into one output sample.
-         * 
-         * @param input 
-         * @param output 
-         * @param sampleCnt 
+         *
+         * @param input
+         * @param output
+         * @param sampleCnt
          */
         static inline void stereoToMono(const int16_t* input, int16_t* output, const uint32_t sampleCnt) {
             int16_t* const out_end = output + sampleCnt;
@@ -144,10 +144,10 @@ namespace audio {
         /**
          * @brief Reads \p sampleCnt samples from \p input, duplicates each of them, and writes the 2* \p sampleCnt
          * samples to \p output
-         * 
-         * @param input 
-         * @param output 
-         * @param sampleCnt 
+         *
+         * @param input
+         * @param output
+         * @param sampleCnt
          */
         template<typename OUT_t>
         requires (sizeof(OUT_t) == 2*sizeof(int16_t) && alignof(OUT_t) >= 2*alignof(int16_t))
@@ -166,7 +166,7 @@ namespace audio {
 
     /**
      * @brief Specialized implementation of the utility functions using the ESP32-S3's SIMD instructions.
-     * 
+     *
      */
     template<>
     struct Utils<arch::SoC::ESP32_S3> : public Utils<arch::SoC::OTHER> {
@@ -175,7 +175,7 @@ namespace audio {
 
         using simd = simdutil::Util<arch::SoC::ESP32_S3>;
 
-        static constexpr std::size_t VEC_LEN_BYTES = simd::VEC_LEN_BYTES;         
+        static constexpr std::size_t VEC_LEN_BYTES = simd::VEC_LEN_BYTES;
 
 
         /* Forms a memory reference to \c bcnt bytes pointed to by \c ptr */
@@ -187,17 +187,15 @@ namespace audio {
 
         /**
          * @brief Clears a memory range to all-0.
-         * 
-         * @tparam D 
-         * @tparam X 
-         * 
+         *
+         * @tparam D
+         * @tparam X
+         *
          * @param mem std::span of the memory to clear
          */
         template<typename D, std::size_t X>
         requires (!std::is_const_v<D>)
         static inline void clr(const std::span<D,X>& mem) {
-            uint32_t dummy;
-            asm ("":"=m" (dummy));
 
             uint32_t byteCnt = mem.size_bytes();
             D* dst = mem.data();
@@ -226,12 +224,12 @@ namespace audio {
         }
 
         /**
-         * @brief 
-         * 
-         * @param input 
+         * @brief
+         *
+         * @param input
          * @param output must be 2-byte aligned!
-         * @param sampleCnt 
-         * @param gainQ16 
+         * @param sampleCnt
+         * @param gainQ16
          */
         // [[gnu::noinline]]
         static inline void reduce32to16(const int32_t* input, int16_t* output, uint32_t sampleCnt, uint32_t gainQ16 = UNITY_GAIN) {
@@ -249,9 +247,9 @@ namespace audio {
             static constexpr unsigned Q_OUT = 0;
             static constexpr unsigned Q_TMP = 1;
 
-            static constexpr std::size_t VEC_LEN_BYTES = simd::VEC_LEN_BYTES; 
+            static constexpr std::size_t VEC_LEN_BYTES = simd::VEC_LEN_BYTES;
 
-            
+
             auto f1 = [&input, &shift](const uint32_t outByteCnt) {
                 // Number of output elements we produce (== number of input elements we'll consume):
                 const uint32_t elemCnt = outByteCnt / OUT_ELEM_SZ;
@@ -269,9 +267,9 @@ namespace audio {
 
                     "EE.VUNZIP.16 q1, q2" "\n" // lower 16 bits -> q1, upper 16 bits -> q2
                     "EE.VSMULAS.S16.QACC q2, q7, 1" "\n" // QACC[n] := q2[n] * q7[1]
-                    "EE.SRCMB.S16.QACC q%[out], %[shift], 0" "\n" // qout[n] := QACC[n] >> sh
+                    "EE.SRCMB.S16.QACC q%[out], %[shift], 0" "\n" // qout[n] := QACC[n] >> shift
 
-                    : 
+                    :
                     : [input] "r" (input),
                       [shift] "r" (shift),
                       "m" (MEM_BYTES(input,inByteCnt)),
@@ -304,7 +302,7 @@ namespace audio {
 
                         "EE.VLD.128.IP q2, %[input], 16" "\n" // load next input
 
-                        "EE.SRCMB.S16.QACC q3, %[shift], 0" "\n" // q3[n] = QACC[n] >> sh
+                        "EE.SRCMB.S16.QACC q3, %[shift], 0" "\n" // q3[n] = QACC[n] >> shift
                         "EE.VST.128.IP q3, %[output], 16" "\n" // write q3 to output
                     ".Lend_%=:"
 
@@ -319,25 +317,25 @@ namespace audio {
                 simdutil::ptrs::incp(input,-3*VEC_LEN_BYTES);
             };
 
-            
-            const uint32_t outByteCnt = sampleCnt * OUT_ELEM_SZ; 
+
+            const uint32_t outByteCnt = sampleCnt * OUT_ELEM_SZ;
 
             simd::process<Q_OUT, Q_TMP>(f1, floop, output, outByteCnt);
         }
 
 
         /**
-         * @brief 
-         * 
-         * @param input 
+         * @brief
+         *
+         * @param input
          * @param output must be 2-byte aligned!
-         * @param sampleCnt 
-         * @param gainQ16 
-         * @param significantBits 
+         * @param sampleCnt
+         * @param gainQ16
+         * @param significantBits
          */
         // [[gnu::noinline]]
         static inline void reduce32to16(const int32_t* input, int16_t* output, const uint32_t sampleCnt, uint32_t gainQ16, const uint32_t significantBits) {
-            
+
             using IN_t = std::remove_reference_t<decltype(*input)>;
             using OUT_t = std::remove_reference_t<decltype(*output)>;
 
@@ -349,7 +347,7 @@ namespace audio {
             static constexpr unsigned Q_TMP = 1;
 
             static constexpr unsigned Q_MASK = 6;
-            static constexpr unsigned Q_GAIN = 7;            
+            static constexpr unsigned Q_GAIN = 7;
             /*
                 Step 1: Set up q7[1] with 15 significant bits from gainQ16
             */
@@ -387,11 +385,11 @@ namespace audio {
 
                     "EE.VUNZIP.16 q1, q2" "\n" // lower 16 bits -> q1, upper 16 bits -> q2
                     "EE.VSMULAS.S16.QACC q2, q%[gain], 1" "\n" // QACC[n] := q2[n] * q7[1]
-                    "EE.SRCMB.S16.QACC q%[out], %[shift], 0" "\n" // qout[n] := QACC[n] >> sh
+                    "EE.SRCMB.S16.QACC q%[out], %[shift], 0" "\n" // qout[n] := QACC[n] >> shift
 
                     "EE.ANDQ q%[out], q%[out], q%[mask]" "\n" // qout[n] := qout[n] & mask
 
-                    : 
+                    :
                     : [input] "r" (input),
                       [shift] "r" (shift),
                       "m" (MEM_BYTES(input,inByteCnt)), // we consume one int32_t for every int16_t we produce.
@@ -425,9 +423,9 @@ namespace audio {
 
                         "EE.VLD.128.IP q2, %[input], 16" "\n" // load next input
 
-                        "EE.SRCMB.S16.QACC q3, %[shift], 0" "\n" // q3[n] = QACC[n] >> sh
+                        "EE.SRCMB.S16.QACC q3, %[shift], 0" "\n" // q3[n] = QACC[n] >> shift
 
-                        "EE.ANDQ q3, q3, q%[mask]" "\n" // q3[n] := q3[n] & mask                        
+                        "EE.ANDQ q3, q3, q%[mask]" "\n" // q3[n] := q3[n] & mask
 
                         "EE.VST.128.IP q3, %[output], 16" "\n" // write q3 to output
                     ".Lend_%=:"
@@ -445,11 +443,11 @@ namespace audio {
                 simdutil::ptrs::incp(input,-3*VEC_LEN_BYTES);
             };
 
-            
+
             /*
                 Step 4: Execute the processing
             */
-            const uint32_t outByteCnt = sampleCnt * OUT_ELEM_SZ; 
+            const uint32_t outByteCnt = sampleCnt * OUT_ELEM_SZ;
 
             simd::process<Q_OUT, Q_TMP>(f1, floop, output, outByteCnt);
 
@@ -458,10 +456,10 @@ namespace audio {
         /**
          * @brief Produces \p sampleCnt output samples by reading 2* \p sampleCnt samples from \p input
          * and averaging each pair of them into one output sample.
-         * 
-         * @param input 
-         * @param output 
-         * @param sampleCnt 
+         *
+         * @param input
+         * @param output
+         * @param sampleCnt
          */
         [[gnu::noinline]]
         static inline void stereoToMono(const int16_t* input, int16_t* output, const uint32_t sampleCnt) {
@@ -491,7 +489,7 @@ namespace audio {
                         "EE.VSMULAS.S16.QACC q2, q7, 0" "\n" // QACC[n] += q2[n] * q7[0]
 
                         "EE.SRCMB.S16.QACC q%[out], %[shift], 0" "\n"
-                    : 
+                    :
                     : [input] "r" (input),
                       [shift] "r" (1),
                       "m" (MEM_BYTES(input, outByteCnt*2)),
@@ -543,10 +541,10 @@ namespace audio {
         /**
          * @brief Reads \p sampleCnt samples from \p input, duplicates each of them, and writes the 2* \p sampleCnt
          * samples to \p output
-         * 
-         * @param input 
+         *
+         * @param input
          * @param output must be \e 4-byte aligned!
-         * @param sampleCnt 
+         * @param sampleCnt
          */
         template<typename OUT_t>
         requires (sizeof(OUT_t) == 2*sizeof(int16_t) && alignof(OUT_t) >= 2*alignof(int16_t))
@@ -570,7 +568,7 @@ namespace audio {
                     "EE.LD.128.USAR.IP q0, %[input], 16" "\n"
                     "EE.VLD.128.IP q1, %[input], -16" "\n"
 
-                    "EE.SRC.Q.QUP q%[out], q0, q1" "\n"   
+                    "EE.SRC.Q.QUP q%[out], q0, q1" "\n"
                     "MV.QR q%[tmp], q%[out]" "\n"
                     "EE.VZIP.16 q%[out], q%[tmp]" "\n"
                     :
@@ -644,7 +642,7 @@ namespace audio {
                         "EE.VLD.128.IP q1, %[input], 16" "\n"
 
                         "LOOPNEZ %[cnt], .Lend_%=" "\n"
-                            "EE.SRC.Q.QUP q2, q0, q1" "\n"   
+                            "EE.SRC.Q.QUP q2, q0, q1" "\n"
 
                             "EE.VLD.128.IP q1, %[input], 16" "\n"
 
@@ -661,7 +659,7 @@ namespace audio {
                         : [cnt] "r" (outByteCnt / (2*VEC_LEN_BYTES)),
                           "m" (MEM_BYTES(input, inByteCnt))
                     );
-                
+
 
                     // Re-adjust input for the number of bytes we 'overread':
                     simdutil::ptrs::incp(input,-2*VEC_LEN_BYTES);
@@ -669,7 +667,7 @@ namespace audio {
                     if(outByteCnt & VEC_LEN_BYTES) {
                         // One more full vector of output to go...
                         asm volatile (
-                            "EE.SRC.Q.QUP q2, q0, q1" "\n"   
+                            "EE.SRC.Q.QUP q2, q0, q1" "\n"
 
                             "MV.QR q3, q2" "\n"
                             "EE.VZIP.16 q2, q3" "\n"
@@ -677,7 +675,7 @@ namespace audio {
                             "EE.VST.128.IP q2, %[output], 16" "\n"
                             : [output] "+r" (output),
                               "=m" (MEM_BYTES(output,VEC_LEN_BYTES))
-                            : 
+                            :
                         );
                         // Now we consumed an additional half vector of input to produce a full vector of output.
                         simdutil::ptrs::incp(input,(VEC_LEN_BYTES * IN_ELEM_SZ)/OUT_ELEM_SZ);
@@ -685,7 +683,7 @@ namespace audio {
                 }
             };
 
-            const uint32_t outByteCnt = sampleCnt * OUT_ELEM_SZ; 
+            const uint32_t outByteCnt = sampleCnt * OUT_ELEM_SZ;
 
             simd::process<Q_OUT, Q_TMP>(f1, floop, output, outByteCnt);
 
@@ -695,11 +693,11 @@ namespace audio {
          * @brief Shifts Q-register \p Q_REG right (down) by \p BYTECNT bytes while
          * inserting the lowest \p BYTECNT bytes of \p data into the upper-most
          * bytes of \p Q_REG.
-         * 
+         *
          * @tparam BYTECNT number of bytes to shift by/insert (0...4)
          * @tparam Q_REG Q-register to shift
          * @tparam Q_TMP temporary Q-register (clobbered)
-         * 
+         *
          * @param data data to shift into the upper bytes of \p Q_REG
          */
         template<std::size_t BYTECNT, unsigned Q_REG, unsigned Q_TMP>
@@ -708,12 +706,12 @@ namespace audio {
             if constexpr (BYTECNT != 0) {
                 asm volatile (
                     "EE.MOVI.32.Q q%[tmp], %[data], 0" "\n"
-                    "EE.SRCI.2Q q%[tmp], q%[tmp], (%[bcnt]-1)" "\n"
+                    "EE.SRCI.2Q q%[tmp], q%[reg], (%[bcnt]-1)" "\n"
                     :
                     : [data] "r" (data),
-                    [reg] "n" (Q_REG),
-                    [tmp] "n" (Q_TMP),
-                    [bcnt] "n" (BYTECNT)
+                      [reg] "n" (Q_REG),
+                      [tmp] "n" (Q_TMP),
+                      [bcnt] "n" (BYTECNT)
                 );
             }
         }
@@ -721,10 +719,10 @@ namespace audio {
 
         /**
          * @brief Shifts the Q-register pair ( \p Q_HI, \p Q_LO ) right (down) by \p bytecnt bytes
-         * 
-         * @tparam Q_HI 
-         * @tparam Q_LO 
-         * 
+         *
+         * @tparam Q_HI
+         * @tparam Q_LO
+         *
          * @param bytecnt number of bytes to shift by
          */
         template<unsigned Q_HI, unsigned Q_LO>
@@ -762,15 +760,15 @@ namespace audio {
                     simdutil::ptrs::put<uint8_t>(ptr,0);
                 }
             }
-            
+
             /**
              * @brief Loads up to 31 significant bits from \p gainQ16 into the lowest int32 lane of Q register \p QR,
              * returns the number of bits the resulting value in \c QR[0] is left-shifted from the original \p gainQ16.
-             * 
+             *
              * @tparam QR Q register to load the scaled gain into
-             * 
-             * @param gainQ16 
-             * @return the scale of the gain in bits 
+             *
+             * @param gainQ16
+             * @return the scale of the gain in bits
              */
             template<unsigned QR>
             requires (QR < 8)
@@ -792,7 +790,7 @@ namespace audio {
                     const uint32_t g32 = (gainQ16 << shift); // g32 is the "mantissa"
 
                     // assert( (g32 >> 16) >= 0x4000 && (g32 >> 16) < 0x8000);
-                    
+
                     // QR[0] := (int16_t)(g32 & 0xffff) - don't care.
                     // QR[1] := (int16_t)(g32 >> 16)
                     asm volatile (
@@ -811,9 +809,9 @@ namespace audio {
             /**
              * @brief Loads a bit mask with only a number of \p significantBits set into
              * every 16-bit lane of Q-register \p QR.
-             * 
+             *
              * @tparam QR Q-register to load the mask into
-             * 
+             *
              * @param significantBits number of bits to set; bits 0...(15-significantBits) will
              * be cleared to 0, any others set to 1.
              */
@@ -828,7 +826,7 @@ namespace audio {
                 if(significantBits < 16) {
                     const uint16_t n_mask = 0xffffu >> significantBits;
 
-                    // q6[n] := n_mask
+                    // qr[n] := n_mask
                     asm volatile (
                         "EE.VLDBC.16 q%[qr], %[n_mask]" "\n"
                         :
@@ -838,7 +836,7 @@ namespace audio {
                     );
                 }
 
-                // q6[n] := ~q6[n]
+                // qr[n] := ~qr[n]
                 asm volatile (
                     "EE.NOTQ q%[qr], q%[qr]"
                     :
