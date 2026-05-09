@@ -23,6 +23,13 @@ class Tmr {
         inline uint32_t stop() const noexcept {
             return esp_cpu_get_cycle_count() - t_start;
         }
+
+        inline uint32_t stop(uint32_t& t) const noexcept {
+            const uint32_t dt = stop();
+            t = (t < dt) ? t : dt;
+            return t;
+        }
+        
     private:
         uint32_t t_start {0};
 };

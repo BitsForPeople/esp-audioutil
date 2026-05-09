@@ -1,4 +1,7 @@
 #pragma once
+/*
+ * Copyright 2026, <https://github.com/BitsForPeople>
+ */
 #include <cstdint>
 #include <array>
 #include <cmath>
@@ -8,7 +11,7 @@ namespace audio {
     /**
      * @brief Lookup table for sine holding only 1/4 wave and mapping all lookups
      * to this.
-     * The table itself is static const and should end up in flash instead of RAM.
+     * The table itself is static constexpr and should end up in flash instead of RAM.
      * 
      * @tparam SZ number of values for the \e full sine wave
      */
@@ -50,14 +53,14 @@ namespace audio {
             
             uint32_t p = i % TABLE_LEN;
 
-            if( (i % (2*TABLE_LEN)) >= TABLE_LEN) {
+            if((i/TABLE_LEN) & 1) {
                 // Odd quadrant, reversed order:
                 p = (TABLE_LEN-1)-p;
             }
 
             int32_t s = table[p];
 
-            if( (i % (4*TABLE_LEN)) >= (2*TABLE_LEN) ) {
+            if((i/(2*TABLE_LEN)) & 1) {
                 // Second half, negative values:
                 s = -s;
             }
@@ -71,7 +74,7 @@ namespace audio {
     /**
      * @brief Lookup table for sine holding all values for a full wave. Uses 4x the memory
      * (and cache!) of the QuarterSinTable, so may or may not be a little faster on access.
-     * The table itself is static const and should end up in flash instead of RAM.
+     * The table itself is static constexpr and should end up in flash instead of RAM.
      * 
      * @tparam SZ number of values for the \e full sine wave
      */
@@ -83,7 +86,7 @@ namespace audio {
 
         private:
             static inline constexpr table_t makeTable(void) {
-                const QuarterSinTable<SZ> st {};
+                constexpr QuarterSinTable<SZ> st {};
                 table_t arr {};
                 for(std::size_t i = 0; i < SZ; ++i) {
                     arr[i] = st[i];

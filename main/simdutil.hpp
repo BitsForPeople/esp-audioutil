@@ -342,13 +342,15 @@
             asm ("":"=m"(dummy));
             {
                 // Make is so that *dst is 16-bytes aligned, if it's not already.
-                const uint32_t off = imp::getOff(dst,outByteLen);
+                uint32_t off = imp::getOff(dst,outByteLen);
+                if constexpr (!std::is_void_v<D>) {
+                    [[assume((off % sizeof(D)) == 0)]];
+                    off -= off % sizeof(D);
+                }
+
                 if(off != 0) {
                     // Get one vector of output:
-                    std::invoke(f1, off, std::forward<Args...>(args)...);
-                    if constexpr (!std::is_void_v<D>) {
-                        [[assume((off % sizeof(D)) == 0)]];
-                    }
+                    std::invoke(f1, off, std::forward<Args>(args)...);
                     // Write as many bytes as needed for alignment to *dst:
                     imp::template writeUnaligned<Q_OUT,Q_TMP>(dst,off,dummy);
                     // Adjust dst to reflect the new (aligned) output location:
@@ -361,17 +363,18 @@
             // assert( ((uintptr_t)dst % VEC_LEN_BYTES) == 0 );
             if((outByteLen / VEC_LEN_BYTES) != 0) [[likely]] {
                 // Process full vectors in a loop: 
-                std::invoke(floop, dst, outByteLen, std::forward<Args...>(args)...);
+                std::invoke(floop, dst, outByteLen, std::forward<Args>(args)...);
                 outByteLen = outByteLen % VEC_LEN_BYTES;
             }
 
             // assert( outByteLen < VEC_LEN_BYTES );
             if(outByteLen != 0) {
                 // Get final vector of output:
-                std::invoke(f1, outByteLen, std::forward<Args...>(args)...);
+                std::invoke(f1, outByteLen, std::forward<Args>(args)...);
 
                 if constexpr (!std::is_void_v<D>) {
                     [[assume((outByteLen % sizeof(D)) == 0)]];
+                    outByteLen -= outByteLen % sizeof(D);
                 }
                 /*
                   We assume that *dst is (still) 16-bytes aligned here, i.e. that
