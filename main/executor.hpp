@@ -12,7 +12,6 @@
 #include "eventgroup.hpp"
 #include "queue.hpp"
 
-// #include "critsect.hpp"
 #include "thrdprio.hpp"
 
 
@@ -159,77 +158,5 @@ namespace executor {
             }
 
     };
-
-    template<job_type job_t, std::size_t MAX_LEN>
-    using JobQueue = freertos::Queue<job_t,MAX_LEN>;
-
-    template<job_type job_t, std::size_t QUEUE_LEN = 8>
-    class Executor : public JobQueue<job_t, QUEUE_LEN> {
-        private:
-            using base = JobQueue<job_t, QUEUE_LEN>;
-        public:
-
-        bool enqueue(const job_t& job, TickType_t maxWait = portMAX_DELAY) {
-            return base::enqueue(job,maxWait);
-        }
-
-        bool execute(TickType_t maxWait = portMAX_DELAY) {
-            job_t j;
-            if(this->dequeue(j,maxWait)) {
-                j.execute();
-                return true;
-            } else {
-                return false;
-            }
-        }
-
-        uint32_t executeFor(TickType_t duration) {
-            const TickType_t start = xTaskGetTickCount();
-            TickType_t ticksLeft;
-            uint32_t cnt = 0;
-            do {
-                ticksLeft = getTicksLeft(start,duration);
-
-                job_t j;
-                if(this->dequeue(j,ticksLeft)) {
-                    cnt += 1;
-                    j.execute();
-                }
-
-            } while(ticksLeft != 0);
-            return cnt;
-        }
-
-        private:
-
-            std::atomic<bool> stopTasks {false};
-
-            static inline TickType_t getTicksLeft(const TickType_t tstart, const TickType_t duration) {
-                if(duration != portMAX_DELAY) {
-                    const TickType_t elapsed = xTaskGetTickCount() - tstart;
-                    return duration - std::min(duration,elapsed);
-                } else {
-                    return portMAX_DELAY;
-                }
-            }
-
-            void taskFinished(TaskHandle_t tsk) {
-
-            }
-
-            void doExecute(void) {
-                // TODO: Semaphore. Wait on semaphore, then check stop flag; only if not set, take job from queue.
-                // Won't actually need a queue anymore (blocking only on semaphore) - ring buffer is sufficient.
-            }
-
-            static void executorTask(void* args) {
-                Executor& ex = *(Executor*)args;
-                while(1) {
-                    ex.execute();
-                }
-            }
-        
-    };
-
 
 } // namespace executor
